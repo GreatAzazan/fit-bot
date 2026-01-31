@@ -1,0 +1,16 @@
+services:
+  fit-bot:
+    image: node:20-alpine
+    container_name: fit-bot
+    working_dir: /app
+    command: node src/index.js
+    volumes:
+      - .:/app:ro
+      - ./node_modules:/app/node_modules:ro
+      - ./credentials.json:/app/credentials.json:ro
+    environment:
+      TELEGRAM_BOT_TOKEN: ${FIT_BOT_TOKEN}
+      GOOGLE_SPREADSHEET_ID: ${FIT_SPREADSHEET_ID}
+      TELEGRAM_CHAT_ID: ${FIT_CHAT_ID}
+      TELEGRAM_THREAD_ID: ${FIT_THREAD_ID}
+    restart: unless-stopped
