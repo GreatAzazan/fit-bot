@@ -13,4 +13,5 @@ services:
       GOOGLE_SPREADSHEET_ID: ${FIT_SPREADSHEET_ID}
       TELEGRAM_CHAT_ID: ${FIT_CHAT_ID}
       TELEGRAM_THREAD_ID: ${FIT_THREAD_ID}
+      NODE_OPTIONS: --dns-result-order=ipv4first
     restart: unless-stopped
