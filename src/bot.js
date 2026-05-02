@@ -80,13 +80,15 @@ function createBot() {
     ]);
   }
 
-  // Exercise selection buttons (2 columns)
-  function getExerciseButtons(prefix = 'ex') {
+  // Exercise selection buttons (2 columns), with checkmarks for recorded ones
+  function getExerciseButtons(recordedExercises = {}, prefix = 'ex') {
     const buttons = [];
     for (let i = 0; i < exercises.length; i += 2) {
-      const row = [Markup.button.callback(exercises[i].name, `${prefix}_${exercises[i].id}`)];
-      if (exercises[i + 1]) {
-        row.push(Markup.button.callback(exercises[i + 1].name, `${prefix}_${exercises[i + 1].id}`));
+      const ex1 = exercises[i];
+      const row = [Markup.button.callback((recordedExercises[ex1.id] ? '✅ ' : '') + ex1.name, `${prefix}_${ex1.id}`)];
+      const ex2 = exercises[i + 1];
+      if (ex2) {
+        row.push(Markup.button.callback((recordedExercises[ex2.id] ? '✅ ' : '') + ex2.name, `${prefix}_${ex2.id}`));
       }
       buttons.push(row);
     }
@@ -95,6 +97,20 @@ function createBot() {
       Markup.button.callback('❌ Отмена', 'menu_main'),
     ]);
     return Markup.inlineKeyboard(buttons);
+  }
+
+  // Format recorded exercises as text list
+  function formatRecordedExercises(recordedExercises) {
+    const entries = Object.entries(recordedExercises);
+    if (entries.length === 0) return '';
+    let text = '\n\nЗаписанные упражнения:';
+    for (const [id, data] of entries) {
+      const exercise = getExerciseById(id);
+      if (!exercise) continue;
+      const repsText = data.reps ? `, ${data.reps} повторений` : '';
+      text += `\n${exercise.name}: ${data.weight} кг${repsText}`;
+    }
+    return text;
   }
 
   // Exercise selection for stats
@@ -111,8 +127,11 @@ function createBot() {
     return Markup.inlineKeyboard(buttons);
   }
 
-  // Start command
+  // Start command - only respond in thread 20
   bot.start(async (ctx) => {
+    if (ctx.message?.message_thread_id !== 20) {
+      return; // Ignore /start outside of thread 20
+    }
     const threadOpts = getThreadOptions(ctx);
     await ctx.reply('🏋️ Фитнес-трекер\n\nВыберите действие:', { ...getMainMenu(), ...threadOpts });
   });
@@ -198,11 +217,26 @@ function createBot() {
     state.mode = 'exercise_input';
     userState.set(userId, state);
 
+    // Get last 3 records for this exercise
+    let historyText = '';
+    try {
+      const stats = await sheets.getExerciseStats(exerciseId);
+      if (stats.length > 0) {
+        const last3 = stats.slice(-3);
+        historyText = '\n\n📋 Последние записи:\n';
+        for (const entry of last3) {
+          historyText += `${entry.date}: ${entry.weight || '-'}кг × ${entry.reps || '-'}\n`;
+        }
+      }
+    } catch (e) {
+      // Ignore errors, just don't show history
+    }
+
     const existing = state.exercises[exerciseId];
-    let prompt = `💪 ${exercise.name}\n\nВведите вес и повторения:\n\`80 10\` — 80кг, 10 повторений\n\`80\` — только вес`;
+    let prompt = `💪 ${exercise.name}${historyText}\nВведите вес и повторения:\n\`80 10\` — 80кг, 10 повторений\n\`80\` — только вес`;
 
     if (existing) {
-      prompt += `\n\n_Текущее: ${existing.weight || '-'}кг × ${existing.reps || '-'}_`;
+      prompt += `\n\n_Сейчас: ${existing.weight || '-'}кг × ${existing.reps || '-'}_`;
     }
 
     await ctx.editMessageText(prompt, {
@@ -225,13 +259,10 @@ function createBot() {
       userState.set(userId, state);
     }
 
-    const recorded = state?.exercises ? Object.keys(state.exercises).length : 0;
-    let text = '📝 Тренировка\n\nВыберите упражнение:';
-    if (recorded > 0) {
-      text += `\n\n_Записано упражнений: ${recorded}_`;
-    }
+    const recorded = state?.exercises || {};
+    let text = '📝 Тренировка\n\nВыберите упражнение:' + formatRecordedExercises(recorded);
 
-    await ctx.editMessageText(text, { parse_mode: 'Markdown', ...getExerciseButtons() });
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', ...getExerciseButtons(recorded) });
   });
 
   // Finish workout
@@ -248,10 +279,10 @@ function createBot() {
 
     try {
       await sheets.saveWorkout(state.date, state.exercises);
-      const count = Object.keys(state.exercises).length;
+      const summary = formatRecordedExercises(state.exercises);
       userState.delete(userId);
       await ctx.editMessageText(
-        `✅ Тренировка сохранена!\n\nЗаписано упражнений: ${count}`,
+        `✅ Тренировка сохранена!` + summary,
         getMainMenu()
       );
     } catch (error) {
@@ -558,12 +589,10 @@ function createBot() {
       state.currentExercise = null;
       userState.set(userId, state);
 
-      const recorded = Object.keys(state.exercises).length;
       await ctx.reply(
         `✅ ${exercise.name}: ${weight}кг${reps ? ` × ${reps}` : ''}\n\n` +
-          `Записано упражнений: ${recorded}\n` +
-          `Выберите следующее или завершите:`,
-        { ...getExerciseButtons(), ...threadOpts }
+          `Выберите следующее или завершите:` + formatRecordedExercises(state.exercises),
+        { ...getExerciseButtons(state.exercises), ...threadOpts }
       );
       return;
     }
